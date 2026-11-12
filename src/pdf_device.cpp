@@ -4,6 +4,7 @@
 #include <textshaping.h>
 
 #include <cmath>
+#include <cstring>
 
 static const double DEG_TO_RAD = M_PI / 180.0;
 
@@ -387,23 +388,24 @@ void PortablePdfDevice::raster(const unsigned int* raster, int w, int h,
 
 // ------------------------------------------------------------------ text
 
-FontSettings PortablePdfDevice::locateFont(const pGEcontext gc,
-                                           double* size_out) {
+FontSettings2 PortablePdfDevice::locateFont(const pGEcontext gc,
+                                            double* size_out) {
   const char* family =
       gc->fontfamily[0] != '\0' ? gc->fontfamily : default_family.c_str();
   int face = gc->fontface;
   bool bold = face == 2 || face == 4;
   bool italic = face == 3 || face == 4;
   if (size_out) *size_out = gc->ps * gc->cex * scale;
-  return locate_font_with_features(family, italic, bold);
+  return systemfonts::ver2::locate_font(family, italic ? 1.0 : 0.0,
+                                        bold ? 700.0 : 400.0, 0.0, nullptr,
+                                        nullptr, 0);
 }
 
 bool PortablePdfDevice::colorGlyph(PdfFont* font, uint32_t orig_gid,
                                    double gx, double gy, double size,
                                    double rot, const pGEcontext gc) {
-  SEXP raster_sexp = PROTECT(get_glyph_raster(
-      (int)orig_gid, font->path.c_str(), (int)font->index, size, 72.0,
-      gc->col));
+  SEXP raster_sexp = PROTECT(systemfonts::ver2::get_glyph_raster(
+      (int)orig_gid, font->settings, size, 72.0, gc->col));
   if (raster_sexp == R_NilValue || !Rf_isInteger(raster_sexp)) {
     UNPROTECT(1);
     return false;
@@ -461,17 +463,18 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
                              double hadj, const pGEcontext gc) {
   if (appending || R_ALPHA(gc->col) == 0) return;
   double size;
-  FontSettings font = locateFont(gc, &size);
+  FontSettings2 font = locateFont(gc, &size);
   if (font.file[0] == '\0') return;
 
   std::vector<textshaping::Point> loc;
   std::vector<uint32_t> id;
   std::vector<int> cluster;
   std::vector<unsigned int> font_index;
-  std::vector<FontSettings> fallbacks;
+  std::vector<FontSettings2> fallbacks;
   std::vector<double> fallback_scaling;
-  int err = textshaping::string_shape(str, font, size, 72.0, loc, id, cluster,
-                                      font_index, fallbacks, fallback_scaling);
+  int err = textshaping::ver2::string_shape(str, font, size, 72.0, loc, id,
+                                            cluster, font_index, fallbacks,
+                                            fallback_scaling);
   if (err != 0 || id.empty()) return;
 
   size_t n_glyphs = id.size();
@@ -483,7 +486,8 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
   if (hadj != 0) {
     // Same width semantics as strWidth() (bearings included) so the anchor
     // adjustment matches the engine's own justification
-    if (textshaping::string_width(str, font, size, 72.0, 1, &width) != 0) {
+    if (textshaping::ver2::string_width(str, font, size, 72.0, 1, &width) !=
+        0) {
       width = 0;
     }
   }
@@ -502,9 +506,9 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
   for (size_t i = 0; i < n_glyphs; i++) {
     unsigned int fi = i < font_index.size() ? font_index[i] : 0;
     if (fi >= fallbacks.size()) fi = 0;
-    const FontSettings& fs = fallbacks.empty() ? font : fallbacks[fi];
+    const FontSettings2& fs = fallbacks.empty() ? font : fallbacks[fi];
     if (fs.file[0] == '\0') continue;
-    PdfFont* pdf_font = doc.getFont(fs.file, fs.index);
+    PdfFont* pdf_font = doc.getFont(fs);
     if (pdf_font->parse_failed) continue;
     uint32_t gid = pdf_font->useGlyph(id[i]);
 
@@ -538,10 +542,11 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
 
 double PortablePdfDevice::strWidth(const char* str, const pGEcontext gc) {
   double size;
-  FontSettings font = locateFont(gc, &size);
+  FontSettings2 font = locateFont(gc, &size);
   if (font.file[0] == '\0') return 0;
   double width = 0;
-  if (textshaping::string_width(str, font, size, 72.0, 1, &width) != 0) {
+  if (textshaping::ver2::string_width(str, font, size, 72.0, 1, &width) !=
+      0) {
     return 0;
   }
   return width;
@@ -551,10 +556,10 @@ void PortablePdfDevice::metricInfo(int c, const pGEcontext gc, double* ascent,
                                    double* descent, double* width) {
   *ascent = *descent = *width = 0;
   double size;
-  FontSettings font = locateFont(gc, &size);
+  FontSettings2 font = locateFont(gc, &size);
   if (font.file[0] == '\0') return;
-  glyph_metrics((uint32_t)c, font.file, font.index, size, 72.0, ascent,
-                descent, width);
+  systemfonts::ver2::glyph_metrics((uint32_t)c, font, size, 72.0, ascent,
+                                   descent, width);
 }
 
 // ------------------------------------------------- paths as R functions
@@ -1037,7 +1042,35 @@ void PortablePdfDevice::glyph(int n, int* glyphs, double* x, double* y,
   const char* file = R_GE_glyphFontFile(font);
   int index = R_GE_glyphFontIndex(font);
   if (file == nullptr || file[0] == '\0') return;
-  PdfFont* pdf_font = doc.getFont(file, (unsigned int)index);
+
+  FontSettings2 fset;
+  std::strncpy(fset.file, file, PATH_MAX);
+  fset.file[PATH_MAX] = '\0';
+  fset.index = (unsigned int)index;
+#if R_GE_version >= 17
+  // Variable font instance requested on the glyph font; tags are packed
+  // big-endian and coordinates are 16.16 fixed point
+  std::vector<int> axes, coords;
+  int n_var = R_GE_glyphFontNumVar(font);
+  for (int i = 0; i < n_var; i++) {
+    const char* axis = R_GE_glyphFontVarAxis(font, i);
+    if (axis == nullptr) continue;
+    uint32_t tag = 0;
+    for (int j = 0; j < 4; j++) {
+      char ch = axis[j] != '\0' ? axis[j] : ' ';
+      tag = (tag << 8) | (uint32_t)(unsigned char)ch;
+    }
+    axes.push_back((int)tag);
+    coords.push_back(
+        (int)std::lround(R_GE_glyphFontVarValue(font, i) * 65536.0));
+  }
+  if (!axes.empty()) {
+    fset.axes = axes.data();
+    fset.coords = coords.data();
+    fset.n_axes = (int)axes.size();
+  }
+#endif
+  PdfFont* pdf_font = doc.getFont(fset);
   if (pdf_font->parse_failed) return;
 
   double gsize = size * scale;

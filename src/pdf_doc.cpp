@@ -91,8 +91,21 @@ static std::string flate_compress(const std::string& data) {
 
 // ---------------------------------------------------------------- PdfFont
 
-PdfFont::PdfFont(const std::string& p, unsigned int idx, int resource_id)
-    : path(p), index(idx), subset_id(resource_id) {
+PdfFont::PdfFont(const FontSettings2& font, int resource_id)
+    : path(font.file), index(font.index), settings(font), subset_id(resource_id) {
+  // Take ownership of the variation coordinates; the pointers in
+  // FontSettings2 may reference transient storage owned by systemfonts
+  if (font.n_axes > 0 && font.axes != nullptr && font.coords != nullptr) {
+    axes_store.assign(font.axes, font.axes + font.n_axes);
+    coords_store.assign(font.coords, font.coords + font.n_axes);
+    settings.axes = axes_store.data();
+    settings.coords = coords_store.data();
+    settings.n_axes = font.n_axes;
+  } else {
+    settings.axes = nullptr;
+    settings.coords = nullptr;
+    settings.n_axes = 0;
+  }
   resource_name = "F" + std::to_string(resource_id);
   if (!sfnt::parse(path, index, metrics)) {
     parse_failed = true;
@@ -129,6 +142,22 @@ uint32_t PdfFont::useGlyph(uint32_t orig_gid) {
     }
   }
   int adv = orig_gid < metrics.advances.size() ? metrics.advances[orig_gid] : 0;
+  if (settings.n_axes > 0) {
+    // hmtx carries default-instance advances; for an instanced font get the
+    // advance at the variation coordinates instead. glyph_metrics is keyed
+    // by codepoint, so map the glyph back through the cmap; glyphs without
+    // a codepoint keep the hmtx value
+    auto cp_it2 = metrics.cmap.find(orig_gid);
+    if (cp_it2 != metrics.cmap.end() && cp_it2->second != 0) {
+      double a, d, w;
+      int upem = metrics.units_per_em;
+      if (systemfonts::ver2::glyph_metrics(cp_it2->second, settings,
+                                           (double)upem, 72.0, &a, &d,
+                                           &w) == 0) {
+        adv = (int)std::lround(w);
+      }
+    }
+  }
   uint32_t new_gid = (uint32_t)sub.size();
   sub.push_back({orig_gid, text, adv});
   gid_map[orig_gid] = new_gid;
@@ -287,13 +316,18 @@ void PdfDoc::addStreamObject(int obj, const std::string& dict_extra,
   objects[obj - 1] = s.str();
 }
 
-PdfFont* PdfDoc::getFont(const std::string& path, unsigned int index) {
-  std::string key = path + "#" + std::to_string(index);
+PdfFont* PdfDoc::getFont(const FontSettings2& font) {
+  std::string key =
+      std::string(font.file) + "#" + std::to_string(font.index);
+  for (int i = 0; i < font.n_axes; i++) {
+    key += "#" + std::to_string((uint32_t)font.axes[i]) + "=" +
+           std::to_string(font.coords[i]);
+  }
   auto it = fonts.find(key);
   if (it != fonts.end()) return it->second.get();
-  auto font = std::unique_ptr<PdfFont>(new PdfFont(path, index, ++font_counter));
-  PdfFont* ret = font.get();
-  fonts.emplace(key, std::move(font));
+  auto new_font = std::unique_ptr<PdfFont>(new PdfFont(font, ++font_counter));
+  PdfFont* ret = new_font.get();
+  fonts.emplace(key, std::move(new_font));
   return ret;
 }
 
@@ -309,9 +343,9 @@ const std::string& PdfFont::glyphOutline(uint32_t orig_gid, bool* no_outline) {
 std::pair<std::string, bool> PdfFont::fetchOutline(uint32_t orig_gid) {
   double ident[6] = {1, 0, 0, 1, 0, 0};
   bool no_outline = false;
-  std::string p =
-      get_glyph_path((int)orig_gid, ident, path.c_str(), (int)index,
-                     (double)metrics.units_per_em, &no_outline);
+  std::string p = systemfonts::ver2::get_glyph_path(
+      (int)orig_gid, ident, settings, (double)metrics.units_per_em,
+      &no_outline);
   return {p, no_outline};
 }
 

@@ -17,9 +17,11 @@ Imports:
     grDevices,
     rlang (>= 1.1.0),
     systemfonts (>= 1.3.2.9000),
-    textshaping (>= 0.4.0)
+    textshaping (>= 1.0.5.9000)
 Suggests:
     grid,
+    knitr,
+    rmarkdown,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 LinkingTo:
@@ -29,4 +31,6 @@ SystemRequirements: zlib
 URL: https://github.com/r-lib/portable
 BugReports: https://github.com/r-lib/portable/issues
 Remotes:
-    r-lib/systemfonts
+    r-lib/systemfonts,
+    r-lib/textshaping
+VignetteBuilder: knitr

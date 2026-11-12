@@ -107,7 +107,7 @@ class PortablePdfDevice {
   int current_mask = -1;
   std::vector<std::string> groups;  // form XObject names; empty = released
 
-  FontSettings locateFont(const pGEcontext gc, double* size_out);
+  FontSettings2 locateFont(const pGEcontext gc, double* size_out);
   // Color emission honoring the device color model
   void setStrokeColor(std::ostringstream& s, unsigned int col);
   void setFillColor(std::ostringstream& s, unsigned int col);

@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <systemfonts.h>
+
 #include "sfnt.h"
 
 // One glyph in the synthesized subset font
@@ -19,7 +21,9 @@ struct SubGlyph {
 
 class PdfFont {
  public:
-  PdfFont(const std::string& path, unsigned int index, int resource_id);
+  // The font is identified by file, index, and variation coordinates;
+  // axes/coords are deep-copied so `settings` is self-contained
+  PdfFont(const FontSettings2& font, int resource_id);
 
   // Record a used glyph from the source font, returning the glyph id it
   // has in the synthesized subset (0 is always .notdef)
@@ -35,6 +39,7 @@ class PdfFont {
 
   std::string path;
   unsigned int index;
+  FontSettings2 settings;  // for outline/raster extraction at the instance
   std::string resource_name;  // e.g. "F3"
   sfnt::Metrics metrics;
   bool parse_failed = false;
@@ -44,6 +49,7 @@ class PdfFont {
   std::vector<SubGlyph> sub;             // subset glyphs, [0] is .notdef
 
  private:
+  std::vector<int> axes_store, coords_store;  // backing store for settings
   // source gid -> (outline path, is bitmap-only)
   std::map<uint32_t, std::pair<std::string, bool>> outline_cache;
   std::pair<std::string, bool> fetchOutline(uint32_t orig_gid);
@@ -66,8 +72,9 @@ class PdfDoc {
   void beginCapture();
   std::string endCapture();
 
-  // Fonts are keyed by file + face index and shared across pages
-  PdfFont* getFont(const std::string& path, unsigned int index);
+  // Fonts are keyed by file, face index, and variation coordinates, and
+  // shared across pages
+  PdfFont* getFont(const FontSettings2& font);
 
   // Embed an RGBA raster, returns the XObject resource name. kAuto keeps RGB
   // but falls back to gray when all pixels are gray; kGray and kCMYK force
