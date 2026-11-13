@@ -22,7 +22,7 @@ knitr::opts_chunk$set(
 
 Portable is a modern PDF graphics device for R, created to supplement the [ragg](https://ragg.r-lib.org) and [svglite](https://svglite.r-lib.org) graphics devices. As such, it is built on the same foundation, using the [systemfonts](https://systemfonts.r-lib.org) and [textshaping](https://github.com/r-lib/textshaping) font stack. In contrast to svglite, the purpose of portable outputs is to be, well, portable. As such it embeds fonts natively ensuring that the graphics is presented equivalently on any system.
 
-Like it's graphics device cousins it intends to keep up to date with new capabilities in the R graphics engine to the extent that the PDF specs allow it. As an example:
+Like its graphics device cousins it intends to keep up to date with new capabilities in the R graphics engine to the extent that the PDF specs allow it. As an example:
 
 * It supports Porter-Duff blending operations even though these are not present in the PDF spec because they can be recreated by various combinations of alpha blending (except `"add"` and `"saturate"`). The `grDevices::pdf()` device achieves this through rasterization which is counter to the purpose of PDF.
 * It does not support device capture because it is not a rasterizing device.
