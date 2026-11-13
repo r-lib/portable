@@ -291,8 +291,8 @@ int PdfFont::writeObjects(PdfDoc& doc) {
 
 // ----------------------------------------------------------------- PdfDoc
 
-PdfDoc::PdfDoc(const std::string& file, double scaling)
-    : filename(file), scale(scaling) {
+PdfDoc::PdfDoc(const std::string& file, double scaling, bool one_file_per_page)
+    : filename(file), scale(scaling), per_page_files(one_file_per_page) {
   if (scale <= 0) scale = 1;
 }
 
@@ -725,6 +725,7 @@ std::string PdfDoc::addGState(double stroke_alpha, double fill_alpha,
 }
 
 void PdfDoc::beginPage(double width_in, double height_in) {
+  page_number++;
   Page p;
   p.width = width_in * 72.0;
   p.height = height_in * 72.0;
@@ -746,6 +747,37 @@ void PdfDoc::endPage() {
   content << "Q\n";
   p.content = content.str();
   page_open = false;
+
+  if (per_page_files) {
+    // Flush this page to its own file, named by expanding the pattern
+    char name[4096];
+    std::snprintf(name, sizeof(name), filename.c_str(), page_number);
+    if (!writeFile(name, pages)) {
+      Rf_warning("failed to write the PDF file '%s'", name);
+    }
+    reset();
+  }
+}
+
+void PdfDoc::reset() {
+  objects.clear();
+  n_objects = 0;
+  pages.clear();
+  content.str("");
+  content.clear();
+  stream_stack.clear();
+  fonts.clear();
+  font_counter = 0;
+  image_counter = 0;
+  gstate_counter = 0;
+  form_counter = 0;
+  pattern_counter = 0;
+  image_objs.clear();
+  form_objs.clear();
+  pattern_objs.clear();
+  shading_objs.clear();
+  gstate_names.clear();
+  gstate_objs.clear();
 }
 
 std::string PdfDoc::resourcesString(
@@ -767,6 +799,17 @@ std::string PdfDoc::resourcesString(
 }
 
 bool PdfDoc::finish() {
+  if (per_page_files) {
+    // Pages were already flushed one file each by endPage(); a leftover
+    // page would mean endPage() was never called, which the device
+    // prevents, so an empty pages vector here is the expected state
+    return true;
+  }
+  return writeFile(filename, pages);
+}
+
+bool PdfDoc::writeFile(const std::string& name,
+                       const std::vector<Page>& file_pages) {
   // Write all font objects and remember resource names -> object numbers
   std::map<std::string, int> font_objs;
   for (auto& kv : fonts) {
@@ -787,7 +830,7 @@ bool PdfDoc::finish() {
 
   // Pages
   std::vector<int> page_objs;
-  for (auto& p : pages) {
+  for (auto& p : file_pages) {
     int contents_obj = newObject();
     addStreamObject(contents_obj, "", p.content, true);
 
@@ -863,7 +906,7 @@ bool PdfDoc::finish() {
     objects[info_obj - 1] = info.str();
   }
 
-  std::ofstream out(filename, std::ios::binary);
+  std::ofstream out(name, std::ios::binary);
   if (!out) return false;
   out << "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";
   std::vector<long> offsets(objects.size() + 1, 0);

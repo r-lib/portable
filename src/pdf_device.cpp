@@ -17,8 +17,9 @@ PortablePdfDevice::PortablePdfDevice(const std::string& file, double width,
                                      const std::string& subject,
                                      const std::string& keywords,
                                      const std::string& creation_date,
-                                     ColorModel colormodel_)
-    : doc(file, scaling),
+                                     ColorModel colormodel_,
+                                     bool one_file_per_page)
+    : doc(file, scaling, one_file_per_page),
       page_width(width * 72.0 * scaling),
       page_height(height * 72.0 * scaling),
       scale(scaling > 0 ? scaling : 1.0),

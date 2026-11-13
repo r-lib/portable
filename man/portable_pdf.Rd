@@ -17,7 +17,12 @@ portable_pdf(
 )
 }
 \arguments{
-\item{file}{Path of the file to write to.}
+\item{file}{Path of the file to write to. As with the ragg and svglite
+devices, the path may contain a \code{sprintf()}-style integer format such as
+\code{"\%03d"}: when it does, each page is written to its own file with the
+pattern expanded to the page number (starting at 1). Without a format,
+all pages are written to the single named file. Use \code{"\%\%"} for a literal
+\verb{\%} when using a format.}
 
 \item{width, height}{Size of the device in inches.}
 

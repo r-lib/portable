@@ -57,7 +57,11 @@ class PdfFont {
 
 class PdfDoc {
  public:
-  PdfDoc(const std::string& filename, double scaling);
+  // When one_file_per_page is true, filename is a printf-style pattern with
+  // a single integer conversion (e.g. "plot%03d.pdf") and each page is
+  // written to its own expanded file as soon as the page ends
+  PdfDoc(const std::string& filename, double scaling,
+         bool one_file_per_page = false);
 
   void beginPage(double width_in, double height_in);
   void endPage();
@@ -133,16 +137,26 @@ class PdfDoc {
  private:
   std::string filename;
   double scale;
+  bool per_page_files;
+  int page_number = 0;  // pages ever begun, for per-page file naming
+
+  struct Page {
+    double width, height;  // physical points
+    std::string content;   // device-unit stream
+  };
+
+  // Assemble fonts, pages, catalog and xref for the given pages and write
+  // them to name; used by both finish() and per-page flushing
+  bool writeFile(const std::string& name, const std::vector<Page>& pages);
+  // Clear all per-document state (objects, fonts, resources) so the doc can
+  // start over for the next per-page file
+  void reset();
 
   // Object store: bodies are kept until finish() so streams can be
   // created incrementally as drawing happens
   std::vector<std::string> objects;  // index + 1 = object number
   int n_objects = 0;
 
-  struct Page {
-    double width, height;  // physical points
-    std::string content;   // device-unit stream
-  };
   std::vector<Page> pages;
 
   std::ostringstream content;          // current page stream

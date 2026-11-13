@@ -19,5 +19,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Thomas Lin Pedersen \email{thomasp85@gmail.com} (\href{https://orcid.org/0000-0002-5147-4711}{ORCID})
 
+Authors:
+\itemize{
+  \item Thomas Lin Pedersen \email{thomasp85@gmail.com} (\href{https://orcid.org/0000-0002-5147-4711}{ORCID})
+}
+
 }
 \keyword{internal}

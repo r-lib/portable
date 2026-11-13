@@ -329,7 +329,7 @@ extern "C" SEXP portable_pdf_c(SEXP file, SEXP width, SEXP height,
                                SEXP scaling, SEXP pointsize, SEXP family,
                                SEXP bg, SEXP title, SEXP author, SEXP creator,
                                SEXP subject, SEXP keywords, SEXP creation_date,
-                               SEXP colormodel) {
+                               SEXP colormodel, SEXP one_file_per_page) {
   const char* filename = R_ExpandFileName(CHAR(STRING_ELT(file, 0)));
   double w = REAL(width)[0];
   double h = REAL(height)[0];
@@ -344,6 +344,7 @@ extern "C" SEXP portable_pdf_c(SEXP file, SEXP width, SEXP height,
   const char* kwd = CHAR(STRING_ELT(keywords, 0));
   const char* cdt = CHAR(STRING_ELT(creation_date, 0));
   const char* cm = CHAR(STRING_ELT(colormodel, 0));
+  bool per_page = Rf_asLogical(one_file_per_page) == TRUE;
 
   if (w <= 0 || h <= 0) Rf_error("width and height must be positive");
   if (sc <= 0) Rf_error("scaling must be positive");
@@ -354,7 +355,7 @@ extern "C" SEXP portable_pdf_c(SEXP file, SEXP width, SEXP height,
 
   PortablePdfDevice* dev =
       new PortablePdfDevice(filename, w, h, sc, fam, ttl, auth, crt, sub, kwd,
-                            cdt, model);
+                            cdt, model, per_page);
   pDevDesc dd = portable_dev_new(dev, ps, sc, bg_rgba);
   if (dd == nullptr) {
     delete dev;
@@ -367,7 +368,7 @@ extern "C" SEXP portable_pdf_c(SEXP file, SEXP width, SEXP height,
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"C_portable_pdf", (DL_FUNC)&portable_pdf_c, 14},
+    {"C_portable_pdf", (DL_FUNC)&portable_pdf_c, 15},
     {nullptr, nullptr, 0}};
 
 extern "C" void R_init_portable(DllInfo* dll) {

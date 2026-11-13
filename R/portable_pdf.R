@@ -5,7 +5,12 @@
 #' ragg devices) and embeds all used fonts so the document renders the same on
 #' any machine.
 #'
-#' @param file Path of the file to write to.
+#' @param file Path of the file to write to. As with the ragg and svglite
+#'   devices, the path may contain a `sprintf()`-style integer format such as
+#'   `"%03d"`: when it does, each page is written to its own file with the
+#'   pattern expanded to the page number (starting at 1). Without a format,
+#'   all pages are written to the single named file. Use `"%%"` for a literal
+#'   `%` when using a format.
 #' @param width,height Size of the device in inches.
 #' @param scaling A scaling factor applied to the device resolution, in the
 #'   same way as the `scaling` argument in ragg and the `scale` argument in
@@ -43,12 +48,14 @@ portable_pdf <- function(file = "portable.pdf", width = 7, height = 7,
     )
   }
   file <- path.expand(file)
+  # A sprintf-style integer format (e.g. "%03d") switches to one file per page
+  one_file_per_page <- grepl("%[-+ #0]*[0-9]*[di]", gsub("%%", "", file))
   bg_col <- grDevices::col2rgb(bg, alpha = TRUE)
   bg_rgba <- as.integer(bg_col[, 1])
   invisible(.Call("C_portable_pdf", file, as.double(width),
                   as.double(height), as.double(scaling), as.double(pointsize),
                   family, bg_rgba, metadata$title, metadata$author,
                   metadata$creator, metadata$subject, metadata$keywords,
-                  metadata$creation_date, colormodel,
+                  metadata$creation_date, colormodel, one_file_per_page,
                   PACKAGE = "portable"))
 }
