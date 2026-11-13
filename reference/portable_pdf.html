@@ -26,6 +26,9 @@ any machine."><!-- mathjax --><script src="https://cdnjs.cloudflare.com/ajax/lib
 
     <div id="navbar" class="navbar-collapse collapse">
       <ul class="nav navbar-nav"><li>
+  <a href="../articles/portable.html">Get started</a>
+</li>
+<li>
   <a href="../reference/index.html">Reference</a>
 </li>
       </ul><ul class="nav navbar-nav navbar-right"><li>
@@ -65,7 +68,8 @@ any machine.</p>
 <span>  family <span class="op">=</span> <span class="st">"sans"</span>,</span>
 <span>  bg <span class="op">=</span> <span class="st">"white"</span>,</span>
 <span>  metadata <span class="op">=</span> <span class="fu"><a href="pdf_metadata.html">pdf_metadata</a></span><span class="op">(</span><span class="op">)</span>,</span>
-<span>  colormodel <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"rgb"</span>, <span class="st">"gray"</span>, <span class="st">"cmyk"</span><span class="op">)</span></span>
+<span>  colormodel <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"rgb"</span>, <span class="st">"gray"</span>, <span class="st">"cmyk"</span><span class="op">)</span>,</span>
+<span>  compress <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -113,6 +117,12 @@ relative to the physical page size.</p></dd>
 <dd><p>Colour model for output: <code>"rgb"</code> (the default), <code>"gray"</code>,
 or <code>"cmyk"</code>. Applies to vector graphics and embedded raster images alike.</p></dd>
 
+
+<dt id="arg-compress">compress<a class="anchor" aria-label="anchor" href="#arg-compress"></a></dt>
+<dd><p>Whether to compress the PDF content streams. Set to <code>FALSE</code>
+to get human-readable content streams, e.g. for debugging the output.
+Embedded font and image data is always compressed.</p></dd>
+
 </dl></div>
     <div id="value">
     <h2>Value</h2>
@@ -124,8 +134,8 @@ or <code>"cmyk"</code>. Applies to vector graphics and embedded raster images al
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="fu">portable_pdf</span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span>fileext <span class="op">=</span> <span class="st">".pdf"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sin</span>, <span class="op">-</span><span class="va">pi</span>, <span class="fl">2</span> <span class="op">*</span> <span class="va">pi</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/grDevices/dev.html" class="external-link">dev.off</a></span><span class="op">(</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> agg_record_1cae76fc47f1 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>                       2 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> agg_record_1ab862dea3b </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                      2 </span>
 <span class="r-in"><span></span></span>
 </code></pre></div>
     </div>
