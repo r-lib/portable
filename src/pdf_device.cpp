@@ -39,6 +39,9 @@ void PortablePdfDevice::newPage(unsigned int fill) {
   if (R_ALPHA(fill) != 0) {
     std::ostringstream& s = doc.stream();
     setFillColor(s, fill);
+    if (R_ALPHA(fill) != 255) {
+      s << "/" << doc.addGState(1.0, R_ALPHA(fill) / 255.0) << " gs\n";
+    }
     s << "0 0 " << pdf_num(page_width) << " " << pdf_num(page_height)
       << " re f\n";
   }
@@ -193,8 +196,27 @@ void PortablePdfDevice::setFill(const pGEcontext gc) {
     if (idx >= 0 && idx < (int)patterns.size() &&
         !patterns[idx].name.empty()) {
       s << "/Pattern cs /" << patterns[idx].name << " scn\n";
-      if (!patterns[idx].alpha_gs.empty()) {
-        s << "/" << patterns[idx].alpha_gs << " gs\n";
+      PatternEntry& pe = patterns[idx];
+      if (!pe.alpha_gs.empty()) {
+        if (current_mask >= 0 && current_mask < (int)masks.size() &&
+            !masks[current_mask].empty()) {
+          // A gstate carries a single SMask, so the gradient's alpha mask and
+          // the active user mask are combined by painting the alpha shading
+          // through the user mask inside a new soft-mask form
+          auto it = pe.masked_gs.find(current_mask);
+          if (it == pe.masked_gs.end()) {
+            std::string fstream = "q\n/" + masks[current_mask] + " gs\n/" +
+                                  pe.alpha_sh + " sh\nQ\n";
+            std::string form = doc.addForm(fstream, true);
+            it = pe.masked_gs
+                     .emplace(current_mask,
+                              doc.addGState(1.0, 1.0, "", form, true))
+                     .first;
+          }
+          s << "/" << it->second << " gs\n";
+        } else {
+          s << "/" << pe.alpha_gs << " gs\n";
+        }
       }
       return;
     }
@@ -209,8 +231,14 @@ void PortablePdfDevice::paint(const std::string& path_ops,
                               const pGEcontext gc, bool winding) {
   bool stroke = R_ALPHA(gc->col) != 0 && !blankLty(gc->lty);
   bool pattern = false;
+  bool pattern_alpha = false;
 #if R_GE_version >= 13
   pattern = gc->patternFill != R_NilValue;
+  if (pattern) {
+    int idx = INTEGER(gc->patternFill)[0];
+    pattern_alpha = idx >= 0 && idx < (int)patterns.size() &&
+                    !patterns[idx].alpha_gs.empty();
+  }
 #endif
   bool fill = pattern || R_ALPHA(gc->fill) != 0;
   if (!stroke && !fill) return;
@@ -221,7 +249,9 @@ void PortablePdfDevice::paint(const std::string& path_ops,
   double fa = pattern ? 1.0 : R_ALPHA(gc->fill) / 255.0;
   const char* fop = winding ? "f" : "f*";
 
-  if (stroke && fill && sa != fa) {
+  // An alpha-gradient fill is painted through its own soft mask, which must
+  // not cover the stroke, so it always gets its own pass
+  if (stroke && fill && (sa != fa || pattern_alpha)) {
     s << "q\n";
     setFill(gc);
     if (fa != 1.0) s << "/" << doc.addGState(1.0, fa) << " gs\n";
@@ -377,13 +407,12 @@ void PortablePdfDevice::raster(const unsigned int* raster, int w, int h,
 
   double rad = rot * DEG_TO_RAD;
   double c = std::cos(rad), sn = std::sin(rad);
-  double cx = x + width / 2, cy = y + height / 2;
+  // R rotates rasters about the anchor corner (x, y), not the centre
   std::ostringstream& s = doc.stream();
-  s << "q\n1 0 0 1 " << pdf_num(cx) << " " << pdf_num(cy) << " cm\n"
+  s << "q\n1 0 0 1 " << pdf_num(x) << " " << pdf_num(y) << " cm\n"
     << pdf_num(c) << " " << pdf_num(sn) << " " << pdf_num(-sn) << " "
     << pdf_num(c) << " 0 0 cm\n"
-    << pdf_num(width) << " 0 0 " << pdf_num(height) << " "
-    << pdf_num(-width / 2) << " " << pdf_num(-height / 2) << " cm\n/"
+    << pdf_num(width) << " 0 0 " << pdf_num(height) << " 0 0 cm\n/"
     << name << " Do\nQ\n";
 }
 
@@ -407,6 +436,16 @@ bool PortablePdfDevice::colorGlyph(PdfFont* font, uint32_t orig_gid,
                                    double rot, const pGEcontext gc) {
   SEXP raster_sexp = PROTECT(systemfonts::ver2::get_glyph_raster(
       (int)orig_gid, font->settings, size, 72.0, gc->col));
+  if (raster_sexp == R_NilValue) {
+    // Bitmap strikes can be sparse per glyph (e.g. Apple Color Emoji glyphs
+    // added in later Unicode versions lack the mid-size strikes), and the
+    // strike is chosen from the requested size. Retry against the largest
+    // strike, which always carries the canonical artwork; the PDF placement
+    // scales the image down to size
+    UNPROTECT(1);
+    raster_sexp = PROTECT(systemfonts::ver2::get_glyph_raster(
+        (int)orig_gid, font->settings, 4096.0, 72.0, gc->col));
+  }
   if (raster_sexp == R_NilValue || !Rf_isInteger(raster_sexp)) {
     UNPROTECT(1);
     return false;
@@ -479,6 +518,15 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
   if (err != 0 || id.empty()) return;
 
   size_t n_glyphs = id.size();
+  size_t str_len = std::strlen(str);
+  // Shaping clusters are codepoint indices; map them to byte offsets in str
+  std::vector<size_t> char_offsets;
+  char_offsets.reserve(str_len + 1);
+  for (size_t b = 0; b < str_len; b++) {
+    if ((str[b] & 0xC0) != 0x80) char_offsets.push_back(b);
+  }
+  char_offsets.push_back(str_len);
+  size_t n_chars = char_offsets.size() - 1;
   double rad = rot * DEG_TO_RAD;
   double c = std::cos(rad), sn = std::sin(rad);
 
@@ -501,7 +549,11 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
   if (R_ALPHA(gc->col) != 255) {
     s << "/" << doc.addGState(1.0, R_ALPHA(gc->col) / 255.0) << " gs\n";
   }
-  s << "BT\n";
+  // Tag the whole string with its exact source text. ToUnicode covers most
+  // extractors, but /ActualText also handles what per-glyph maps cannot:
+  // glyphs reused across different source texts, multi-glyph clusters, and
+  // color glyphs drawn as raster images (which are not font glyphs at all)
+  s << "/Span <</ActualText <" << utf8_to_utf16be_hex(str) << ">>> BDC\nBT\n";
 
   std::string current_font;
   for (size_t i = 0; i < n_glyphs; i++) {
@@ -511,7 +563,35 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
     if (fs.file[0] == '\0') continue;
     PdfFont* pdf_font = doc.getFont(fs);
     if (pdf_font->parse_failed) continue;
-    uint32_t gid = pdf_font->useGlyph(id[i]);
+
+    // Recover the glyph's source text from its shaping cluster for the
+    // ToUnicode map. The span runs from the glyph's cluster to the next
+    // higher cluster value; only the first glyph of a cluster gets the text,
+    // so one-to-many glyph mappings are not duplicated on copy. This is what
+    // keeps ligatures and contextual forms (which no cmap reaches)
+    // searchable and copy-pasteable.
+    std::string glyph_text;
+    if (i < cluster.size() && cluster[i] >= 0 &&
+        (size_t)cluster[i] < n_chars) {
+      bool first_in_cluster = true;
+      for (size_t j = 0; j < i && first_in_cluster; j++) {
+        if (j < cluster.size() && cluster[j] == cluster[i]) {
+          first_in_cluster = false;
+        }
+      }
+      if (first_in_cluster) {
+        size_t end_char = n_chars;
+        for (size_t j = 0; j < n_glyphs; j++) {
+          if (j < cluster.size() && (size_t)cluster[j] > (size_t)cluster[i] &&
+              (size_t)cluster[j] < end_char) {
+            end_char = (size_t)cluster[j];
+          }
+        }
+        size_t start_byte = char_offsets[(size_t)cluster[i]];
+        glyph_text.assign(str + start_byte, char_offsets[end_char] - start_byte);
+      }
+    }
+    uint32_t gid = pdf_font->useGlyph(id[i], glyph_text);
 
     // fallback_scaling is per font; -1 means no scaling
     double fscale = fi < fallback_scaling.size() ? fallback_scaling[fi] : -1.0;
@@ -538,7 +618,7 @@ void PortablePdfDevice::text(double x, double y, const char* str, double rot,
       << pdf_num(c) << " " << pdf_num(gx) << " " << pdf_num(gy) << " Tm <"
       << pdf_hex16(gid) << "> Tj\n";
   }
-  s << "ET\nQ\n";
+  s << "ET\nEMC\nQ\n";
 }
 
 double PortablePdfDevice::strWidth(const char* str, const pGEcontext gc) {
@@ -663,7 +743,7 @@ SEXP PortablePdfDevice::setPattern(SEXP pattern) {
                                    R_GE_linearGradientY1(pattern),
                                    R_GE_linearGradientX2(pattern),
                                    R_GE_linearGradientY2(pattern), stops, cols,
-                                   extend, &e.alpha_gs);
+                                   extend, &e.alpha_gs, &e.alpha_sh);
       break;
     }
     case R_GE_radialGradientPattern: {
@@ -685,7 +765,7 @@ SEXP PortablePdfDevice::setPattern(SEXP pattern) {
           R_GE_radialGradientCX1(pattern), R_GE_radialGradientCY1(pattern),
           R_GE_radialGradientR1(pattern), R_GE_radialGradientCX2(pattern),
           R_GE_radialGradientCY2(pattern), R_GE_radialGradientR2(pattern),
-          stops, cols, extend, &e.alpha_gs);
+          stops, cols, extend, &e.alpha_gs, &e.alpha_sh);
       break;
     }
     case R_GE_tilingPattern: {
@@ -726,7 +806,11 @@ SEXP PortablePdfDevice::setPattern(SEXP pattern) {
 }
 
 void PortablePdfDevice::releasePattern(SEXP ref) {
-  if (ref == R_NilValue) return;
+  // grid signals "release everything" with R_NilValue (L_clearDefinitions)
+  if (ref == R_NilValue) {
+    patterns.clear();
+    return;
+  }
   int idx = INTEGER(ref)[0];
   if (idx >= 0 && idx < (int)patterns.size()) {
     patterns[idx] = PatternEntry();
@@ -775,10 +859,13 @@ SEXP PortablePdfDevice::setClipPath(SEXP path, SEXP ref) {
 }
 
 void PortablePdfDevice::releaseClipPath(SEXP ref) {
-  if (ref == R_NilValue) return;
-  int idx = INTEGER(ref)[0];
-  if (idx >= 0 && idx < (int)clip_paths.size()) {
-    clip_paths[idx] = ClipPathEntry{"", R_GE_nonZeroWindingRule};
+  if (ref == R_NilValue) {
+    clip_paths.clear();
+  } else {
+    int idx = INTEGER(ref)[0];
+    if (idx >= 0 && idx < (int)clip_paths.size()) {
+      clip_paths[idx] = ClipPathEntry{"", R_GE_nonZeroWindingRule};
+    }
   }
   std::ostringstream& s = doc.stream();
   if (clipped || path_clip_active) s << "Q q\n";
@@ -830,7 +917,11 @@ SEXP PortablePdfDevice::setMask(SEXP mask, SEXP ref) {
 }
 
 void PortablePdfDevice::releaseMask(SEXP ref) {
-  if (ref == R_NilValue) return;
+  if (ref == R_NilValue) {
+    masks.clear();
+    current_mask = -1;
+    return;
+  }
   int idx = INTEGER(ref)[0];
   if (idx >= 0 && idx < (int)masks.size()) {
     masks[idx].clear();
@@ -1026,7 +1117,10 @@ void PortablePdfDevice::useGroup(SEXP ref, SEXP trans) {
 }
 
 void PortablePdfDevice::releaseGroup(SEXP ref) {
-  if (ref == R_NilValue) return;
+  if (ref == R_NilValue) {
+    groups.clear();
+    return;
+  }
   int idx = INTEGER(ref)[0];
   if (idx >= 0 && idx < (int)groups.size()) {
     groups[idx].clear();

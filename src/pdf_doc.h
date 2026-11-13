@@ -26,8 +26,12 @@ class PdfFont {
   PdfFont(const FontSettings2& font, int resource_id);
 
   // Record a used glyph from the source font, returning the glyph id it
-  // has in the synthesized subset (0 is always .notdef)
-  uint32_t useGlyph(uint32_t orig_gid);
+  // has in the synthesized subset (0 is always .notdef). text, when given,
+  // is the glyph's source text (from shaping clusters) and is used for the
+  // ToUnicode map in place of the source font's cmap — this is what makes
+  // ligatures and contextual forms copy-pasteable, since those glyphs are
+  // unreachable from any cmap. May be a multi-codepoint string.
+  uint32_t useGlyph(uint32_t orig_gid, const std::string& text = "");
 
   // Outline path for a source glyph in font units, or empty when the
   // glyph has no outline (bitmap/color font). Result is cached.
@@ -98,16 +102,20 @@ class PdfDoc {
   // Shading patterns. Stops and colors must have the same length. Returns
   // the pattern resource name; when any stop has alpha < 255, an alpha
   // gradient soft mask is also built and *alpha_gs is set to its ExtGState
-  // resource name. extend: 1=pad, 2=repeat, 3=reflect, 4=none.
+  // resource name (and *alpha_sh, when given, to the gray shading's resource
+  // name, so callers can composite it with additional masks).
+  // extend: 1=pad, 2=repeat, 3=reflect, 4=none.
   std::string addAxialPattern(double x1, double y1, double x2, double y2,
                               const std::vector<double>& stops,
                               const std::vector<unsigned int>& cols,
-                              int extend, std::string* alpha_gs);
+                              int extend, std::string* alpha_gs,
+                              std::string* alpha_sh = nullptr);
   std::string addRadialPattern(double cx1, double cy1, double r1, double cx2,
                                double cy2, double r2,
                                const std::vector<double>& stops,
                                const std::vector<unsigned int>& cols,
-                               int extend, std::string* alpha_gs);
+                               int extend, std::string* alpha_gs,
+                               std::string* alpha_sh = nullptr);
   // Tiling pattern from a captured drawing stream (device units)
   std::string addTilingPattern(double x, double y, double width, double height,
                                const std::string& tile_stream, int extend);
@@ -196,7 +204,8 @@ class PdfDoc {
   std::string addGradientPattern(bool radial, const double coords[6],
                                  const std::vector<double>& stops,
                                  const std::vector<unsigned int>& cols,
-                                 int extend, std::string* alpha_gs);
+                                 int extend, std::string* alpha_gs,
+                                 std::string* alpha_sh);
   std::string resourcesString(
       const std::map<std::string, int>& font_objs) const;
 

@@ -115,30 +115,36 @@ PdfFont::PdfFont(const FontSettings2& font, int resource_id)
   sub.push_back({0, "", adv0});
 }
 
-uint32_t PdfFont::useGlyph(uint32_t orig_gid) {
+uint32_t PdfFont::useGlyph(uint32_t orig_gid, const std::string& text) {
   if (orig_gid == 0) return 0;
   auto it = gid_map.find(orig_gid);
-  if (it != gid_map.end()) return it->second;
+  if (it != gid_map.end()) {
+    // A later call may know the source text where the first did not
+    SubGlyph& g = sub[it->second];
+    if (g.text.empty() && !text.empty()) g.text = text;
+    return it->second;
+  }
 
-  std::string text;
+  std::string t = text;
   auto cp_it = metrics.cmap.find(orig_gid);
-  if (cp_it != metrics.cmap.end() && cp_it->second != 0) {
+  // Fall back to the source font's cmap when the source text is unknown
+  if (t.empty() && cp_it != metrics.cmap.end() && cp_it->second != 0) {
     // Encode the codepoint as UTF-8
     uint32_t cp = cp_it->second;
     if (cp < 0x80) {
-      text += (char)cp;
+      t += (char)cp;
     } else if (cp < 0x800) {
-      text += (char)(0xC0 | (cp >> 6));
-      text += (char)(0x80 | (cp & 0x3F));
+      t += (char)(0xC0 | (cp >> 6));
+      t += (char)(0x80 | (cp & 0x3F));
     } else if (cp < 0x10000) {
-      text += (char)(0xE0 | (cp >> 12));
-      text += (char)(0x80 | ((cp >> 6) & 0x3F));
-      text += (char)(0x80 | (cp & 0x3F));
+      t += (char)(0xE0 | (cp >> 12));
+      t += (char)(0x80 | ((cp >> 6) & 0x3F));
+      t += (char)(0x80 | (cp & 0x3F));
     } else {
-      text += (char)(0xF0 | (cp >> 18));
-      text += (char)(0x80 | ((cp >> 12) & 0x3F));
-      text += (char)(0x80 | ((cp >> 6) & 0x3F));
-      text += (char)(0x80 | (cp & 0x3F));
+      t += (char)(0xF0 | (cp >> 18));
+      t += (char)(0x80 | ((cp >> 12) & 0x3F));
+      t += (char)(0x80 | ((cp >> 6) & 0x3F));
+      t += (char)(0x80 | (cp & 0x3F));
     }
   }
   int adv = orig_gid < metrics.advances.size() ? metrics.advances[orig_gid] : 0;
@@ -159,7 +165,7 @@ uint32_t PdfFont::useGlyph(uint32_t orig_gid) {
     }
   }
   uint32_t new_gid = (uint32_t)sub.size();
-  sub.push_back({orig_gid, text, adv});
+  sub.push_back({orig_gid, t, adv});
   gid_map[orig_gid] = new_gid;
   return new_gid;
 }
@@ -469,28 +475,36 @@ int PdfDoc::addShading(bool radial, const double coords[6],
 std::string PdfDoc::addAxialPattern(double x1, double y1, double x2, double y2,
                                     const std::vector<double>& stops,
                                     const std::vector<unsigned int>& cols,
-                                    int extend, std::string* alpha_gs) {
+                                    int extend, std::string* alpha_gs,
+                                    std::string* alpha_sh) {
   double coords[6] = {x1, y1, x2, y2, 0, 0};
-  return addGradientPattern(false, coords, stops, cols, extend, alpha_gs);
+  return addGradientPattern(false, coords, stops, cols, extend, alpha_gs,
+                            alpha_sh);
 }
 
 std::string PdfDoc::addRadialPattern(double cx1, double cy1, double r1,
                                      double cx2, double cy2, double r2,
                                      const std::vector<double>& stops,
                                      const std::vector<unsigned int>& cols,
-                                     int extend, std::string* alpha_gs) {
+                                     int extend, std::string* alpha_gs,
+                                     std::string* alpha_sh) {
   double coords[6] = {cx1, cy1, r1, cx2, cy2, r2};
-  return addGradientPattern(true, coords, stops, cols, extend, alpha_gs);
+  return addGradientPattern(true, coords, stops, cols, extend, alpha_gs,
+                            alpha_sh);
 }
 
 std::string PdfDoc::addGradientPattern(bool radial, const double coords[6],
                                        const std::vector<double>& stops,
                                        const std::vector<unsigned int>& cols,
-                                       int extend, std::string* alpha_gs) {
+                                       int extend, std::string* alpha_gs,
+                                       std::string* alpha_sh) {
   int sh = addShading(radial, coords, stops, cols, extend, false);
   int obj = newObject();
   std::ostringstream p;
-  p << "<< /Type /Pattern /PatternType 2 /Shading " << sh << " 0 R >>";
+  // Pattern coordinates are device units; the matrix maps them into the
+  // page's default (unscaled) space so scaling != 1 renders correctly
+  p << "<< /Type /Pattern /PatternType 2 /Shading " << sh << " 0 R /Matrix ["
+    << pdf_num(1.0 / scale) << " 0 0 " << pdf_num(1.0 / scale) << " 0 0] >>";
   objects[obj - 1] = p.str();
   std::string name = "P" + std::to_string(++pattern_counter);
   pattern_objs.emplace_back(name, obj);
@@ -511,6 +525,7 @@ std::string PdfDoc::addGradientPattern(bool radial, const double coords[6],
     int sh_gray = addShading(radial, coords, stops, alpha_cols, extend, true);
     std::string sh_name = "Sh" + std::to_string(sh_gray);
     shading_objs.emplace_back(sh_name, sh_gray);
+    if (alpha_sh) *alpha_sh = sh_name;
     std::ostringstream fs;
     fs << "q\n/" << sh_name << " sh\nQ\n";
     std::string form = addForm(fs.str(), true);
@@ -534,7 +549,8 @@ std::string PdfDoc::addTilingPattern(double x, double y, double width,
   dict << "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox ["
        << pdf_num(x) << " " << pdf_num(y) << " " << pdf_num(x + width) << " "
        << pdf_num(y + height) << "] /XStep " << pdf_num(xstep) << " /YStep "
-       << pdf_num(ystep) << " /Resources @RESOURCES@";
+       << pdf_num(ystep) << " /Matrix [" << pdf_num(1.0 / scale) << " 0 0 "
+       << pdf_num(1.0 / scale) << " 0 0] /Resources @RESOURCES@";
   addStreamObject(obj, dict.str(), tile_stream, compress_streams);
   std::string name = "P" + std::to_string(++pattern_counter);
   pattern_objs.emplace_back(name, obj);

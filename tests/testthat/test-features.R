@@ -380,3 +380,131 @@ test_that("dotted lines with round caps become solid zero-length dashes", {
   expect_match(content, "[0 1.5 ] 0 d", fixed = TRUE)
   expect_match(content, "1 J", fixed = TRUE)
 })
+
+test_that("semi-transparent page backgrounds get an alpha gstate", {
+  file <- render_pdf(plot.new(), bg = "#FF000080")
+  content <- paste(pdf_streams(file), collapse = "\n")
+  expect_match(content, "/GS1 gs\n0 0 ", fixed = TRUE)
+  raw <- raw_pdf(file)
+  expect_gt(grepRaw("/ca 0.502", raw, fixed = TRUE), 0)
+})
+
+test_that("rotated rasters pivot about the anchor corner", {
+  file <- tempfile(fileext = ".pdf")
+  portable_pdf(file)
+  grid::grid.newpage()
+  grid::pushViewport(grid::viewport(angle = 45))
+  grid::grid.raster(matrix(c("#FF0000", "#0000FF"), nrow = 1),
+                    x = grid::unit(0.2, "npc"), y = grid::unit(0.2, "npc"),
+                    width = grid::unit(0.4, "npc"),
+                    height = grid::unit(0.4, "npc"),
+                    just = c("left", "bottom"))
+  dev.off()
+  content <- paste(pdf_streams(file), collapse = "\n")
+  # the image is scaled from the origin of the rotated frame (i.e. from the
+  # anchor corner), not offset by half the image size
+  expect_match(content, "201.6 0 0 201.6 0 0 cm\n", fixed = TRUE)
+})
+
+test_that("patterns map device units to page space when scaling != 1", {
+  skip_if(getRversion() < "4.2.0")
+  file <- render_grid(
+    grid::grid.rect(gp = grid::gpar(
+      fill = grid::linearGradient(c("red", "blue")))),
+    scaling = 2
+  )
+  raw <- raw_pdf(file)
+  expect_gt(grepRaw("/Matrix [0.5 0 0 0.5 0 0]", raw, fixed = TRUE), 0)
+})
+
+test_that("alpha-gradient fills do not mask the stroke", {
+  skip_if(getRversion() < "4.2.0")
+  file <- render_grid(
+    grid::grid.rect(gp = grid::gpar(
+      fill = grid::linearGradient(c("#FF000080", "#0000FF80")),
+      col = "#00FF00FF"))
+  )
+  content <- paste(pdf_streams(file), collapse = "\n")
+  # fill and stroke are painted in separate passes; the soft-mask gstate is
+  # only applied to the fill pass
+  expect_match(content, "re\nf\nQ", fixed = TRUE)
+  expect_match(content, "re\nS\nQ", fixed = TRUE)
+  expect_no_match(content, "re\nB", fixed = TRUE)
+})
+
+test_that("alpha gradients combine with an active user mask", {
+  skip_if(getRversion() < "4.2.0")
+  file <- tempfile(fileext = ".pdf")
+  portable_pdf(file)
+  grid::grid.newpage()
+  grid::pushViewport(grid::viewport(
+    mask = grid::circleGrob(r = 0.4, gp = grid::gpar(fill = "black"))))
+  grid::grid.rect(gp = grid::gpar(
+    fill = grid::linearGradient(c("#FF000080", "#0000FF80"))))
+  dev.off()
+  streams <- pdf_streams(file)
+  # a soft-mask form paints the alpha shading through the user mask's gstate
+  combined <- Filter(function(s) {
+    grepl(" gs\n/", s, fixed = TRUE) && grepl(" sh", s, fixed = TRUE)
+  }, streams)
+  expect_length(combined, 1)
+})
+
+test_that("grid.newpage releases all patterns, masks, clip paths, and groups", {
+  skip_if(getRversion() < "4.2.0")
+  file <- tempfile(fileext = ".pdf")
+  portable_pdf(file)
+  grid::grid.newpage()
+  grid::pushViewport(grid::viewport(
+    mask = grid::circleGrob(r = 0.4, gp = grid::gpar(fill = "black"))))
+  grid::grid.rect(gp = grid::gpar(
+    fill = grid::linearGradient(c("red", "blue"))))
+  grid::grid.newpage()
+  expect_no_error(grid::grid.rect(gp = grid::gpar(fill = "orange")))
+  grid::grid.newpage()
+  expect_no_error(grid::grid.rect(gp = grid::gpar(
+    fill = grid::linearGradient(c("red", "blue")))))
+  dev.off()
+  raw <- raw_pdf(file)
+  expect_gt(grepRaw("/Count 3", raw, fixed = TRUE), 0)
+})
+
+test_that("ligature glyphs map to their source characters in ToUnicode", {
+  file <- render_pdf({
+    plot.new()
+    text(0.5, 0.5, "fi", cex = 3)
+  })
+  # the ToUnicode CMap stream is written uncompressed
+  raw <- raw_pdf(file)
+  expect_gt(grepRaw("beginbfchar", raw, fixed = TRUE), 0)
+  # multi-codepoint value: the ligature copies as "fi"
+  expect_gt(grepRaw("<00660069>", raw, fixed = TRUE), 0)
+})
+
+test_that("contextual forms (Arabic) get per-character ToUnicode entries", {
+  file <- render_pdf({
+    plot.new()
+    text(0.5, 0.5, "\u0645\u0631\u062D\u0628\u0627", cex = 3)  # "مرحبا"
+  })
+  raw <- raw_pdf(file)
+  # every source character is recoverable; no empty mappings
+  for (cp in c("0627", "0628", "062D", "0631", "0645")) {
+    expect_gt(grepRaw(paste0("<", cp, ">"), raw, fixed = TRUE), 0)
+  }
+  expect_length(grepRaw("> <>", raw, fixed = TRUE), 0)
+})
+
+test_that("text is tagged with an /ActualText span holding the source string", {
+  file <- render_pdf({
+    plot.new()
+    text(0.5, 0.5, "fi", cex = 3)
+    text(0.5, 0.2, "x\U0001F600y", cex = 3)
+  })
+  content <- paste(pdf_streams(file), collapse = "\n")
+  # exact source text per span, including what ToUnicode cannot express
+  # (emoji images, reused glyphs)
+  expect_match(content, "/Span <</ActualText <00660069>>> BDC", fixed = TRUE)
+  expect_match(content, "/Span <</ActualText <0078D83DDE000079>>> BDC",
+               fixed = TRUE)
+  expect_match(content, "ET\nEMC\nQ", fixed = TRUE)
+})

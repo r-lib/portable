@@ -10,6 +10,7 @@
 
 #include <systemfonts.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -95,6 +96,10 @@ class PortablePdfDevice {
   struct PatternEntry {
     std::string name;      // empty = released slot
     std::string alpha_gs;  // ExtGState for gradients with alpha, or empty
+    std::string alpha_sh;  // gray shading behind alpha_gs, or empty
+    // alpha SMask combined with a user mask (PDF allows one SMask per
+    // gstate), keyed by mask index, built lazily at paint time
+    std::map<int, std::string> masked_gs;
   };
   std::vector<PatternEntry> patterns;
 
