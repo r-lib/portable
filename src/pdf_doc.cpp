@@ -291,8 +291,12 @@ int PdfFont::writeObjects(PdfDoc& doc) {
 
 // ----------------------------------------------------------------- PdfDoc
 
-PdfDoc::PdfDoc(const std::string& file, double scaling, bool one_file_per_page)
-    : filename(file), scale(scaling), per_page_files(one_file_per_page) {
+PdfDoc::PdfDoc(const std::string& file, double scaling, bool one_file_per_page,
+               bool compress)
+    : filename(file),
+      scale(scaling),
+      per_page_files(one_file_per_page),
+      compress_streams(compress) {
   if (scale <= 0) scale = 1;
 }
 
@@ -373,7 +377,7 @@ std::string PdfDoc::addForm(const std::string& stream, bool gray_group,
        << "] /Group << /S /Transparency /CS " << (gray_group ? "/DeviceGray" : "/DeviceRGB")
        << (isolated ? " /I true" : "")
        << " >> /Resources @RESOURCES@";
-  addStreamObject(obj, dict.str(), stream, true);
+  addStreamObject(obj, dict.str(), stream, compress_streams);
   std::string name = "Fm" + std::to_string(++form_counter);
   form_objs.emplace_back(name, obj);
   return name;
@@ -531,7 +535,7 @@ std::string PdfDoc::addTilingPattern(double x, double y, double width,
        << pdf_num(x) << " " << pdf_num(y) << " " << pdf_num(x + width) << " "
        << pdf_num(y + height) << "] /XStep " << pdf_num(xstep) << " /YStep "
        << pdf_num(ystep) << " /Resources @RESOURCES@";
-  addStreamObject(obj, dict.str(), tile_stream, true);
+  addStreamObject(obj, dict.str(), tile_stream, compress_streams);
   std::string name = "P" + std::to_string(++pattern_counter);
   pattern_objs.emplace_back(name, obj);
   return name;
@@ -832,7 +836,7 @@ bool PdfDoc::writeFile(const std::string& name,
   std::vector<int> page_objs;
   for (auto& p : file_pages) {
     int contents_obj = newObject();
-    addStreamObject(contents_obj, "", p.content, true);
+    addStreamObject(contents_obj, "", p.content, compress_streams);
 
     int page_obj = newObject();
     std::ostringstream po;

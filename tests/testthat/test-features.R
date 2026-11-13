@@ -196,6 +196,36 @@ test_that("grid.path strokes and fills work", {
   expect_match(content, "B\n", fixed = TRUE)
 })
 
+test_that("fill rules are honoured", {
+  skip_if(getRversion() < "4.2.0")
+  # Concentric squares in the same orientation: even-odd makes a hole,
+  # nonzero winding fills everything
+  holey_path <- function(rule) {
+    grid::grid.draw(grid::pathGrob(
+      x = c(0.2, 0.8, 0.8, 0.2, 0.35, 0.65, 0.65, 0.35),
+      y = c(0.2, 0.2, 0.8, 0.8, 0.35, 0.35, 0.65, 0.65),
+      id.lengths = c(4, 4), rule = rule, gp = grid::gpar(fill = "red")
+    ))
+  }
+  evenodd <- paste(pdf_streams(render_grid(holey_path("evenodd"))),
+                   collapse = "\n")
+  winding <- paste(pdf_streams(render_grid(holey_path("winding"))),
+                   collapse = "\n")
+  expect_match(evenodd, "B*\n", fixed = TRUE)
+  expect_match(winding, "B\n", fixed = TRUE)
+  expect_false(grepl("B*", winding, fixed = TRUE))
+
+  # The plain polygon primitive always uses nonzero winding (holes are
+  # expressed by reversed subpath orientation)
+  poly <- paste(pdf_streams(render_grid(grid::grid.polygon(
+    x = c(0.2, 0.8, 0.8, 0.2, 0.35, 0.35, 0.65, 0.65),
+    y = c(0.2, 0.2, 0.8, 0.8, 0.35, 0.65, 0.65, 0.35),
+    id = rep(1:2, each = 4), gp = grid::gpar(fill = "red")
+  ))), collapse = "\n")
+  expect_match(poly, "B\n", fixed = TRUE)
+  expect_false(grepl("B*", poly, fixed = TRUE))
+})
+
 test_that("document metadata is written to the Info dictionary", {
   file <- render_pdf(
     plot(1:10),

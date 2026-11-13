@@ -25,7 +25,7 @@ class PortablePdfDevice {
                     const std::string& creator, const std::string& subject,
                     const std::string& keywords,
                     const std::string& creation_date, ColorModel colormodel,
-                    bool one_file_per_page);
+                    bool one_file_per_page, bool compress);
   ~PortablePdfDevice() = default;
 
   void newPage(unsigned int fill);

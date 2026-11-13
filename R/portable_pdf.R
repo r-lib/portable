@@ -22,6 +22,9 @@
 #' @param metadata Document metadata, created with [pdf_metadata()].
 #' @param colormodel Colour model for output: `"rgb"` (the default), `"gray"`,
 #'   or `"cmyk"`. Applies to vector graphics and embedded raster images alike.
+#' @param compress Whether to compress the PDF content streams. Set to `FALSE`
+#'   to get human-readable content streams, e.g. for debugging the output.
+#'   Embedded font and image data is always compressed.
 #'
 #' @return Invisibly, the path to the created file.
 #'
@@ -34,8 +37,12 @@
 portable_pdf <- function(file = "portable.pdf", width = 7, height = 7,
                          scaling = 1, pointsize = 12, family = "sans",
                          bg = "white", metadata = pdf_metadata(),
-                         colormodel = c("rgb", "gray", "cmyk")) {
+                         colormodel = c("rgb", "gray", "cmyk"),
+                         compress = TRUE) {
   colormodel <- arg_match(colormodel)
+  if (!isTRUE(compress) && !identical(compress, FALSE)) {
+    cli_abort("{.arg compress} must be `TRUE` or `FALSE`.")
+  }
   check_string(file)
   check_number_decimal(width, min = 0, allow_infinite = FALSE)
   check_number_decimal(height, min = 0, allow_infinite = FALSE)
@@ -57,5 +64,5 @@ portable_pdf <- function(file = "portable.pdf", width = 7, height = 7,
                   family, bg_rgba, metadata$title, metadata$author,
                   metadata$creator, metadata$subject, metadata$keywords,
                   metadata$creation_date, colormodel, one_file_per_page,
-                  PACKAGE = "portable"))
+                  compress, PACKAGE = "portable"))
 }

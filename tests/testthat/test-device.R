@@ -68,6 +68,15 @@ test_that("the background colour fills the page", {
   expect_true(any(grepl("1 1 0.8784 rg", streams, fixed = TRUE)))
 })
 
+test_that("compress = FALSE leaves content streams human-readable", {
+  file <- render_pdf(plot(1:10), compress = FALSE)
+  raw <- readBin(file, "raw", file.size(file))
+  # Only the embedded font stream is still compressed
+  expect_length(grepRaw("/FlateDecode", raw, all = TRUE, fixed = TRUE), 1)
+  # The page content stream is plain text
+  expect_gt(grepRaw("0 0 504 504 re f", raw, fixed = TRUE), 0)
+})
+
 test_that("invalid dimensions are rejected", {
   expect_error(portable_pdf(tempfile(fileext = ".pdf"), width = 0))
   expect_error(portable_pdf(tempfile(fileext = ".pdf"), scaling = -1))

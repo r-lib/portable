@@ -61,7 +61,7 @@ class PdfDoc {
   // a single integer conversion (e.g. "plot%03d.pdf") and each page is
   // written to its own expanded file as soon as the page ends
   PdfDoc(const std::string& filename, double scaling,
-         bool one_file_per_page = false);
+         bool one_file_per_page = false, bool compress = true);
 
   void beginPage(double width_in, double height_in);
   void endPage();
@@ -138,6 +138,9 @@ class PdfDoc {
   std::string filename;
   double scale;
   bool per_page_files;
+  // Compress text streams (content, forms, tiling patterns); font and image
+  // data is always compressed
+  bool compress_streams;
   int page_number = 0;  // pages ever begun, for per-page file naming
 
   struct Page {

@@ -13,7 +13,8 @@ portable_pdf(
   family = "sans",
   bg = "white",
   metadata = pdf_metadata(),
-  colormodel = c("rgb", "gray", "cmyk")
+  colormodel = c("rgb", "gray", "cmyk"),
+  compress = TRUE
 )
 }
 \arguments{
@@ -41,6 +42,10 @@ relative to the physical page size.}
 
 \item{colormodel}{Colour model for output: \code{"rgb"} (the default), \code{"gray"},
 or \code{"cmyk"}. Applies to vector graphics and embedded raster images alike.}
+
+\item{compress}{Whether to compress the PDF content streams. Set to \code{FALSE}
+to get human-readable content streams, e.g. for debugging the output.
+Embedded font and image data is always compressed.}
 }
 \value{
 Invisibly, the path to the created file.
