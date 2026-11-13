@@ -1,0 +1,66 @@
+---
+title: "Getting started with portable"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with portable}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+portable is an R package providing a PDF graphics device (ie. a way to render R graphics to a PDF file). As such it fills the same need as the `pdf()` function from the grDevices package which is most likely how you have created PDF graphics until now.
+
+```{r setup}
+library(portable)
+```
+
+## Why portable
+We've created portable to fill a specific set of needs:
+
+* Create PDFs using the same font stack as the ragg and svglite graphics devices (ie. systemfonts and textshaping)
+* Provide automatic font embedding in PDF files for truly portable output
+
+As such, portable serves the other end of the spectrum than svglite when it comes to vector graphic output. Where svglite favors speed, and ease of post-editing, portable favors truthful and identical rendering across environments. 
+
+## Rendering a PDF
+portable is a graphics device in the standard sense and you use it in the same way you'd use `ragg::agg_png()` or, perhaps more pertinent, `pdf()`:
+
+```{r}
+library(ggplot2)
+pdf_file <- tempfile(fileext = ".pdf")
+
+portable_pdf(pdf_file)
+p <- ggplot(mpg) + 
+  geom_point(aes(hwy, cty, color = class)) + 
+  facet_wrap(~year)
+plot(p)
+invisible(dev.off())
+
+knitr::include_graphics(pdf_file)
+```
+
+There are more arguments than the file path you can set, but the general approach is this, and if you've used graphics devices directly before there will be few surprises for you.
+
+### Controlling the output
+Apart from the standard arguments you'd expect for any graphics device, which sets the dimensions of the output etc., there are a few that deserves a few more words:
+
+* `scaling`: This argument shows it's kinship to ragg and svglite, as it fully replicates the same argument as they have. It can be used to control the absolute size of resolution dependent values (e.g. font size and linewidth). You can read more about it in the [*Taking control of plot scaling* blog post](https://opensource.posit.co/blog/2020-08-21_taking-control-of-plot-scaling/).
+* `metadata`: PDF documents can contain metadata about itself, such as the author, keywords, etc. You can populate these with this argument and use the `pdf_metadata()` helper function to create the inputs to the argument.
+* `colormodel`: PDF can encode colors in different ways, all carrying different pros and cons. The default, `"rgb"` stores colors in the standard RGB format that is also used in R. If the graphics doesn't contain any colors you can instead use the `"gray" colorspace to reduce file size a bit as well as ensure there are no differences in color-to-grayscale conversion when you print in grayscale. Lastly, if your end goal is printing, you can choose the `"cmyk"` colorspace that more faithfully stores how printers think about colors (in the same way that `"rgb"` stores how screens think about color).
+
+### Anatomy of the output
+In many ways the writer follows standard PDF 1.7 specs in its output, with default zlib "best" compression of its stream. There are a few R graphics specific choices worth pointing out for the curious. 
+
+### Font embedding
+portable embeds fonts. It is one of the reasons for its existence so that should come as no surprise. Rather than embed the full font which would add a ludicrous overhead to any plot (especially if it contained an emoji), portable subsets the font to only contain the glyphs in use in the plot keeping the final file size lean. The subsetting happens by synthesizing a new minimal font, containing only what is needed for proper display. This means that you cannot extract the font from the embedding and expect it to work, but then again, why would you.
+
+Text retains the correct unicode mapping even after the font has been subsetted so selection and copying from the PDF should work as expected, even with heavily ligatured text such as arabic. This also means that the PDF is fully supporting accessibility such as screen readers
+
+### Port Duff composition
+The grid package has for some years now allowed users to define groups of graphic objects and compose them together using a set of composition operators. Supporting these different modes is at the discretion of the graphics device though, and PDF does not support every mode that R enumerates, specifically all the Porter-Duff alpha composition modes. The `cairo_pdf()` device handles this by rasterizing the content of the groups before combining, but that sort of defeats the whole purpose of a vector-graphics device. portable instead replicates the operators as specific alpha mask combinations preserving full scalability of the output. The only two operators that can't be supported through this is `"add"` and `"saturate"` and portable refuses these rather than performing a silent rasterization of the output.

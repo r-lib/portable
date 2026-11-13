@@ -9,3 +9,4 @@ src/*.so
 src/*.dll
 src/*.dylib
 tests/testthat/_problems
+inst/doc
